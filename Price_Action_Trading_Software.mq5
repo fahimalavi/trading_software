@@ -17,22 +17,21 @@ CAccountInfo account;
 
 const double C_LOT_SIZE = 0.5;
 
-// number of digits after decimal point
-const int c_double_acc = 4;
-
 const double c_trading_offset = 0.0003;
-const double c_SL_OFFESET = 0.002;
+const double c_SL_OFFESET = 0.0015;
 
 // Make sure level should be at least 0.6%
 //const double level[]={75.4, 76.0, 76.4, 77};        // Brent
 
-//const int C_LEVEL_DEPTH = 5;
-//const double level[]={87.8, 88.18, 88.72, 89.1, 89.55};      // Amazon 12-12-22
-
 const int C_LEVEL_DEPTH = 9;
-const double level[]={91.13, 91.76, 92.12, 92.48, 92.82, 93.22, 93.72, 94.57, 95.82};      // Amazon 13-12-22
+const double level[]={87.23, 87.53, 87.83, 88.02, 88.23, 88.55, 88.8, 89.1, 89.55, 89.8};      // Amazon 12-12-22
 int level_success[]={0, 0, 0, 0, 0, 0, 0, 0, 0};
 int level_failure[]={0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+//const int C_LEVEL_DEPTH = 10;
+//const double level[]={91.13, 91.55, 91.76, 92.12, 92.48, 92.82, 93.22, 93.72, 94.57, 95.82};      // Amazon 14-12-22
+//int level_success[]={0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+//int level_failure[]={0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 double profit_val;
 int selected_level = -1;
 int forbidden_level = -1; // it is the one you should avoid, drop few times before another level is hit
@@ -40,10 +39,12 @@ const int c_buying_condition_met_size = 3;
 const int c_buying_condition_valid_size = 3;
 
 // MA-3/7, PSAR, RSI-3/7, PSAR-RSI-Buy, PSAR-RSI-Sell
-const int c_number_of_indicators=5;
-int num_trades_triggered_per_ind[]={0,0,0,0,0};
-int num_successful_trades_triggered_per_ind[] = {0,0,0,0,0};
-bool current_trade_triggered_per_ind[] = {false, false, false, false, false};
+const int c_number_of_indicators=6;
+int num_trades_triggered_per_ind[]={0,0,0,0,0,0};
+int num_successful_trades_triggered_per_ind[] = {0,0,0,0,0,0};
+bool current_trade_triggered_per_ind[] = {false, false, false, false, false,false};
+
+const int PSAR_RSI_WEIGHT=3;
 
 int num_of_profitable_trd = 0;
 int num_of_non_profitable_trd = 0;
@@ -58,11 +59,12 @@ double ma7[];
 double ma20[];
 double ma50[];
 
-const double C_RSI_BUYING = 70.0;
-const double C_RSI_SELLING = 60.0;
+const double C_RSI_BUYING = 50.0;
+const double C_RSI_SELLING = 50.0;
 int rsi3_handle = 0;
 int rsi7_handle = 0;
 const int c_rsi_size=3;
+const double rsi_trading_delta = 0.1;
 double rsi3_arr[];
 double rsi7_arr[];
 
@@ -70,7 +72,12 @@ int psar_handle = 0;
 double psar_arr[];
 const int c_psar_size=7; // Don't place less than 4
 
-
+int macd_handle=0;
+double macd_arr[];
+const int c_macd_size=3;
+const int c_slow_period=10;
+const int c_fast_period=5;
+const int c_signal_period=3;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -79,13 +86,15 @@ int OnInit()
   {
    ma3_handle = iMA(_Symbol,PERIOD_CURRENT,3,0,MODE_SMA,PRICE_CLOSE);
    ma7_handle = iMA(_Symbol,PERIOD_CURRENT,7,0,MODE_SMA,PRICE_CLOSE);
-   ma20_handle = iMA(_Symbol,PERIOD_CURRENT,20,0,MODE_SMA,PRICE_CLOSE);
-   ma50_handle = iMA(_Symbol,PERIOD_CURRENT,50,0,MODE_SMA,PRICE_CLOSE);
+   //ma20_handle = iMA(_Symbol,PERIOD_CURRENT,20,0,MODE_SMA,PRICE_CLOSE);
+   //ma50_handle = iMA(_Symbol,PERIOD_CURRENT,50,0,MODE_SMA,PRICE_CLOSE);
    
    rsi3_handle = iRSI(_Symbol,PERIOD_CURRENT,3,PRICE_CLOSE);   
    rsi7_handle = iRSI(_Symbol,PERIOD_CURRENT,7,PRICE_CLOSE);
    
    psar_handle = iSAR(_Symbol, PERIOD_CURRENT,0.02, 0.2);
+   
+   macd_handle = iMACD(_Symbol,PERIOD_CURRENT,c_fast_period,c_slow_period,c_signal_period,PRICE_CLOSE);
 //--- object for working with the account
 //--- receiving the account number, the Expert Advisor is launched at
    long login=account.Login();
@@ -139,6 +148,8 @@ void OnDeinit(const int reason)
                num_trades_triggered_per_ind[3], num_successful_trades_triggered_per_ind[3]);
    PrintFormat("PSAR-RSI_SELLING based trades=%d, Number of success = %d", 
                num_trades_triggered_per_ind[4], num_successful_trades_triggered_per_ind[4]);
+   PrintFormat("PSAR-MACD based trades=%d, Number of success = %d", 
+               num_trades_triggered_per_ind[5], num_successful_trades_triggered_per_ind[5]);
                
    for(int i=0; i<C_LEVEL_DEPTH; i++)
    {
@@ -267,26 +278,32 @@ void calculate_indicators()
 {
    CopyBuffer(ma3_handle,0,0,c_MA_Size,ma3);
    CopyBuffer(ma7_handle,0,0,c_MA_Size,ma7);
-   CopyBuffer(ma20_handle,0,0,c_MA_Size,ma20);
-   CopyBuffer(ma50_handle,0,0,c_MA_Size,ma50);
+   //CopyBuffer(ma20_handle,0,0,c_MA_Size,ma20);
+   //CopyBuffer(ma50_handle,0,0,c_MA_Size,ma50);
    
    CopyBuffer(rsi3_handle,0,0,c_rsi_size,rsi3_arr);   
    CopyBuffer(rsi7_handle,0,0,c_rsi_size,rsi7_arr);
    
    CopyBuffer(psar_handle,0,0,c_psar_size,psar_arr); 
+   CopyBuffer(macd_handle,0,0,c_macd_size,macd_arr);
 }
 
-void print_indicators(bool& trade_triggered[])
+void print_indicators()
 {    
-   PrintFormat("MA3:%f, MA7:%f, MA20:%f, MA50:%f, RSI3:%f, RSI7:%f PSAR:%f",
-                  ma3[c_MA_Size-1],ma7[c_MA_Size-1],ma20[c_MA_Size-1],ma50[c_MA_Size-1]
-                  ,rsi3_arr[c_rsi_size-1],rsi7_arr[c_rsi_size-1], psar_arr[c_psar_size-1]);
+   PrintFormat("MA3:%f, MA7:%f, RSI3:%f, RSI7:%f PSAR:%f",
+        ma3[c_MA_Size-1],ma7[c_MA_Size-1],rsi3_arr[c_rsi_size-1],rsi7_arr[c_rsi_size-1], psar_arr[c_psar_size-1]);
    PrintFormat("Latest RSI > last 2 RSI ind. -> RSI3[0]=%f, RSI3[1]=%f, RSI3[2]=%f",
-                  rsi3_arr[0],rsi3_arr[1],rsi3_arr[2]);
-   PrintFormat("MA-3/7:%d, PSAR:%d, RSI-3/7:%d, PSAR-RSI-Buy:%d, PSAR-RSI-Sell:%d",
-      trade_triggered[0],trade_triggered[1],trade_triggered[2],
-      trade_triggered[3], trade_triggered[4]);
+        rsi3_arr[0],rsi3_arr[1],rsi3_arr[2]);
+   PrintFormat("macd[2]:%f, macd[1]:%f, macd[0]:%f (%d/%d)", macd_arr[c_macd_size-1], macd_arr[c_macd_size-2], macd_arr[c_macd_size-3],
+      macd_arr[c_macd_size-1] >= macd_arr[c_macd_size-2], macd_arr[c_macd_size-1] >= macd_arr[c_macd_size-3]);
 
+}
+
+void print_indicator_per_tick(bool& trade_triggered[])
+{
+   PrintFormat("MA-3/7:%d, PSAR:%d, RSI-3/7:%d, PSAR-RSI-Buy:%d, PSAR-RSI-Sell:%d, MACD:%d",
+         trade_triggered[0],trade_triggered[1],trade_triggered[2],
+         trade_triggered[3], trade_triggered[4], trade_triggered[5]);
 }
 
 bool buying_condition_met(double ask_value, int index)
@@ -300,8 +317,8 @@ bool buying_condition_met(double ask_value, int index)
    //}
    if(is_moving_average_indicating_buying())
    {
-      num_indicator_met++;
-      current_trade_triggered_per_ind[0] = true;
+      //num_indicator_met++;
+      //current_trade_triggered_per_ind[0] = true;
    }
    else
    {
@@ -332,7 +349,7 @@ bool buying_condition_met(double ask_value, int index)
    
    if(is_PSAR_RSI_Buying_Direction(ask_value, index) == true)
    {
-      num_indicator_met+=3;
+      num_indicator_met+=PSAR_RSI_WEIGHT;
       current_trade_triggered_per_ind[3] = true;
    }
    else
@@ -342,12 +359,22 @@ bool buying_condition_met(double ask_value, int index)
    
    if(is_PSAR_RSI_Selling_Direction(ask_value, index) == true)
    {
-      num_indicator_met--;
+      num_indicator_met-=2;
       current_trade_triggered_per_ind[4] = true;
    }
    else
    {
       current_trade_triggered_per_ind[4] = false;
+   }
+   
+   if(is_macd_bullish() == true)
+   {
+      num_indicator_met++;
+      current_trade_triggered_per_ind[5] = true;
+   }
+   else
+   {
+      current_trade_triggered_per_ind[5] = false;
    }
    
    //if(detect_upwards_buying_RSI())
@@ -360,24 +387,26 @@ bool buying_condition_met(double ask_value, int index)
    //   current_trade_triggered_per_ind[3] = false;
    //}
    
+   print_indicator_per_tick(current_trade_triggered_per_ind);
+   
    if(num_indicator_met >= c_buying_condition_met_size)
    {
       ret_val = true;
       current_ind_trade_triggered();
-      print_indicators(current_trade_triggered_per_ind);
+      print_indicators();
    }
    else
    {
-      PrintFormat("%f buying condition not met=>%d! MA-3/7:%d, PSAR:%d, RSI-3/7:%d, PSAR-RSI-Buy:%d, PSAR-RSI-Sell:%d",
+      PrintFormat("%f buying condition not met=>%d! MA-3/7:%d, PSAR:%d, RSI-3/7:%d, PSAR-RSI-Buy:%d, PSAR-RSI-Sell:%d, MACD:%d",
       level[index], num_indicator_met,current_trade_triggered_per_ind[0],current_trade_triggered_per_ind[1],current_trade_triggered_per_ind[2],
-      current_trade_triggered_per_ind[3], current_trade_triggered_per_ind[4]);
+      current_trade_triggered_per_ind[3], current_trade_triggered_per_ind[4], current_trade_triggered_per_ind[5]);
    }
    return ret_val;
 }
 
 bool is_moving_average_indicating_buying()
 {
-   if(ma3[c_MA_Size-1] > ma7[c_MA_Size-1])
+   if(ma3[c_MA_Size-1] >= ma7[c_MA_Size-1])
    {
       return true;
    }
@@ -390,7 +419,50 @@ bool is_moving_average_indicating_buying()
 // Value can be ask or bid value
 bool is_PSAR_trade_buying_direction(double value)
 {
-   if(psar_arr[c_psar_size-1] < value)
+   if(psar_arr[c_psar_size-1] < value && psar_arr[c_psar_size-2] < value)
+   {
+      return true;
+   }
+   else
+   {
+      return false;
+   }
+}
+
+bool is_rsi_crossover_indicating_buying()
+{
+   // RSI3 is greater than RSI7 and make sure that RSI3 is going down by 10% margin
+   if(rsi3_arr[c_rsi_size-1] > rsi7_arr[c_rsi_size-1] && is_RSI3_increasing())
+   {
+      return true;
+   }
+   else
+   {
+      return false;
+   }
+}
+
+// Not increasing and not stable
+bool is_RSI3_decreasing()
+{
+   if((rsi3_arr[c_rsi_size-1] < rsi3_arr[c_rsi_size-2]) &&
+   ((rsi3_arr[c_rsi_size-2]-rsi3_arr[c_rsi_size-1])/rsi3_arr[c_rsi_size-2] > rsi_trading_delta) &&
+      ((rsi3_arr[c_rsi_size-3]-rsi3_arr[c_rsi_size-1])/rsi3_arr[c_rsi_size-3] > rsi_trading_delta)
+   )
+   {
+      return true;
+   }
+   else
+   {
+      return false;
+   }
+}
+
+bool is_RSI3_increasing(){
+   if((rsi3_arr[c_rsi_size-1] > rsi3_arr[c_rsi_size-2]) &&
+      ((rsi3_arr[c_rsi_size-1]-rsi3_arr[c_rsi_size-2])/rsi3_arr[c_rsi_size-1] > rsi_trading_delta) 
+      && ((rsi3_arr[c_rsi_size-1]-rsi3_arr[c_rsi_size-3])/rsi3_arr[c_rsi_size-1] > rsi_trading_delta)
+      )
    {
       return true;
    }
@@ -407,15 +479,15 @@ bool is_PSAR_RSI_Buying_Direction(double ask_value, int index)
    if(index < (C_LEVEL_DEPTH-1))
    {
       // PSAR value is Selling even above level, and RSI indicating oversold. It can be a good buy
-      if((psar_arr[c_psar_size-1]> (level[index+1]*(1-c_SL_OFFESET))) && (rsi3_arr[c_rsi_size-1] <= C_RSI_BUYING))
+      if((psar_arr[c_psar_size-2]> (level[index+1]*(1-c_SL_OFFESET/2.0))) && is_RSI3_increasing())
       {
          ret_val = true;
       }
-      else
+      //else
       {
-         PrintFormat("PSAR_RSI_Buying::PSAR:%f, next Level:%f, RSI3:%f (%d/%d)",psar_arr[c_psar_size-1]*(1-c_SL_OFFESET), level[index+1], 
-            rsi3_arr[c_rsi_size-1],(psar_arr[c_psar_size-1]> (level[index+1]*(1-c_SL_OFFESET))), 
-            (rsi3_arr[c_rsi_size-1]<= C_RSI_BUYING));
+         PrintFormat("PSAR_RSI_Buying::PSAR:%f, next Level with SL:%f, RSI3:%f (%d/%d)",psar_arr[c_psar_size-2], level[index+1]*(1-c_SL_OFFESET/2.0), 
+            rsi3_arr[c_rsi_size-1],(psar_arr[c_psar_size-2]> (level[index+1]*(1-c_SL_OFFESET/2.0))), 
+            is_RSI3_increasing());
       }
    }
    else
@@ -425,22 +497,23 @@ bool is_PSAR_RSI_Buying_Direction(double ask_value, int index)
    return ret_val;
 }
 
+// It is only in buying decision, not in selling
 bool is_PSAR_RSI_Selling_Direction(double ask_value, int index)
 {
    bool ret_val = false;
    // Not first index
    if(index > 0)
    {
-      // PSAR value is Selling even above level, and RSI indicating oversold(overbought with downward direction). It can be a good buy
-      if((psar_arr[c_psar_size-1] < level[index-1]) && (rsi3_arr[c_rsi_size-1] >= C_RSI_SELLING))
+      // PSAR value is Selling even above level, and RSI3 increasing. It can be a good buy
+      if((psar_arr[c_psar_size-1] < (level[index-1]*(1+(c_SL_OFFESET/2.0)))) && !is_RSI3_increasing())
       {
          ret_val = true;
       }
-      else
-      {
-         PrintFormat("PSAR_RSI_Selling::PSAR:%f, next Level:%f, RSI3:%f (%d/%d)",psar_arr[c_psar_size-1], level[index+1],
-             rsi3_arr[c_rsi_size-1], (psar_arr[c_psar_size-1] < level[index-1]), (rsi3_arr[c_rsi_size-1] >= C_RSI_SELLING));
-      }
+      //else
+      //{
+      //   PrintFormat("PSAR_RSI_Selling::PSAR:%f, next Level:%f, RSI3:%f (%d/%d)",psar_arr[c_psar_size-1], level[index+1],
+      //       rsi3_arr[c_rsi_size-1], (psar_arr[c_psar_size-1] < level[index-1]), (rsi3_arr[c_rsi_size-1] >= C_RSI_SELLING));
+      //}
    }
    else
    {
@@ -449,24 +522,30 @@ bool is_PSAR_RSI_Selling_Direction(double ask_value, int index)
    return ret_val;
 }
 
-bool is_rsi_crossover_indicating_buying()
+bool is_macd_bullish()
 {
-   if(rsi3_arr[c_rsi_size-1] > rsi7_arr[c_rsi_size-1])
+   bool ret_val = false;
+   // Not first index
+   //if(macd_arr[c_macd_size-1] >= macd_arr[c_macd_size-2] && macd_arr[c_macd_size-1] >= macd_arr[c_macd_size-3])
+   if(macd_arr[c_macd_size-1] > 0.0)
    {
-      return true;
+      ret_val = true;
    }
    else
    {
-      return false;
+      ret_val = false;
    }
+   return ret_val;
 }
+
+
 
 bool is_buying_condition_valid()
 {
    bool ret_val=false;
    int   num_indicator_met = 0;
    double bid_value = SymbolInfoDouble(_Symbol,SYMBOL_BID);
-   bool indicators_status[] = {false, false, false, false, false};
+   bool indicators_status[] = {false, false, false, false, false,false};
    
    calculate_indicators();
 
@@ -510,29 +589,44 @@ bool is_buying_condition_valid()
       indicators_status[3] = false;
    }
    
-   if(is_PSAR_RSI_Selling_Direction(bid_value, selected_level) == true)
+   //if(is_PSAR_RSI_Selling_Direction(bid_value, selected_level) == true)
+   //{
+   //   num_indicator_met--;
+   //   indicators_status[4] = true;
+   //}
+   //else
+   //{
+   //   indicators_status[4] = false;
+   //}
+   
+   if(is_macd_bullish() == true)
    {
-      num_indicator_met--;
-      indicators_status[4] = true;
+      num_indicator_met++;
+      indicators_status[5] = true;
    }
    else
    {
-      indicators_status[4] = false;
+      indicators_status[5] = false;
    }
    
-   // Buying condition and in loss
-   if(num_indicator_met < c_buying_condition_valid_size)
+   print_indicator_per_tick(indicators_status);
+   
+   // Buying condition invalid and in loss
+   if(num_indicator_met < c_buying_condition_valid_size && bid_value < (level[selected_level]*(1-c_SL_OFFESET/3.0))
+      //(num_indicator_met < (c_buying_condition_valid_size-1) && (bid_value < level[selected_level])) || 
+      //(bid_value < (level[selected_level]*(1+c_SL_OFFESET/2.0)) && num_indicator_met < (c_buying_condition_valid_size-1))
+      )
    {
-      if(trade.RequestSL() < bid_value*(1-c_trading_offset))
-      {
-         Print("is_buying_condition_valid::Modifying the current order as basis of Order no longer valid!");
-         trade.PositionModify(_Symbol,bid_value*(1-c_trading_offset),bid_value);
-         print_indicators(indicators_status);
-      }
-      else
-      {
-         Print("is_buying_condition_valid::Skipping modification as stoploss near");
-      }
+      //if(trade.RequestSL() < bid_value*(1-c_trading_offset))
+      //{
+      //   Print("is_buying_condition_valid::Modifying the current order as basis of Order no longer valid!");
+      //   trade.PositionModify(_Symbol,bid_value*(1-c_trading_offset),bid_value);
+      //   print_indicators();
+      //}
+      //else
+      //{
+      //   Print("is_buying_condition_valid::Skipping modification as stoploss near");
+      //}
    }
    return ret_val;
 }
@@ -554,7 +648,7 @@ bool detect_early_psar(double ask_value)
    bool ret_val = false;
 
    // May be 5  or 5candles ago psar was showing sell, It is relative (may or may not be correct)
-   if(psar_arr[0] > ask_value || psar_arr[3] > ask_value)
+   if(psar_arr[0] > ask_value)
    {
       // Here we detect early psar buyig signal
       ret_val = true;
@@ -595,19 +689,3 @@ bool not_a_continuous_failure_level(int index)
    }
    return ret_val;
 }
-
-bool Compare_Doubles(double A, double B, string checkStr)
-{
-   //checkStr = StringTrimLeft(StringTrimRight(checkStr));
-   double diff = 0.000000000000001; // 15 decimal places
-   //double diff = 0.000000005;
-   //double diff = 0.00000001;
-   if     (checkStr == ">" ){if (A - B >  diff)return(true);else return(false);}
-   else if(checkStr == "<" ){if (B - A >  diff)return(true);else return(false);}
-   else if(checkStr == ">="){if (A - B > -diff)return(true);else return(false);}
-   else if(checkStr == "<="){if (B - A > -diff)return(true);else return(false);}
-   else if(checkStr == "!="){if (MathAbs(A - B) >  diff)return(true);else return(false);}
-   else if(checkStr == "=" || checkStr == "=="){if (MathAbs(A - B) <  diff)return(true);else return(false);}
-   else {Print("Sorry, bad usage: AvsB(A, checkStr, B).  Wrong checkStr value: ",checkStr);}
-   return(false);
-} // end of AvsB
