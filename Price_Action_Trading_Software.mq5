@@ -18,7 +18,7 @@ CAccountInfo account;
 const double C_LOT_SIZE = 0.5;
 
 const double c_trading_offset = 0.0003;
-const double c_SL_OFFESET = 0.0015;
+const double c_SL_OFFESET = 0.002;
 
 // Make sure level should be at least 0.6%
 //const double level[]={75.4, 76.0, 76.4, 77};        // Brent
@@ -526,8 +526,8 @@ bool is_macd_bullish()
 {
    bool ret_val = false;
    // Not first index
-   //if(macd_arr[c_macd_size-1] >= macd_arr[c_macd_size-2] && macd_arr[c_macd_size-1] >= macd_arr[c_macd_size-3])
-   if(macd_arr[c_macd_size-1] > 0.0)
+   if(macd_arr[c_macd_size-1] >= macd_arr[c_macd_size-2] && macd_arr[c_macd_size-1] >= macd_arr[c_macd_size-3])
+   //if(macd_arr[c_macd_size-1] > 0.0)
    {
       ret_val = true;
    }
